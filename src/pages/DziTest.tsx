@@ -85,27 +85,27 @@ const DziTest = () => {
 
       // Add event handlers for debugging
       viewer.addHandler("tile-loaded", (event: any) => {
-        console.log("✅ Tile loaded successfully:", event);
+        console.log("Tile loaded successfully:", event);
       });
 
       viewer.addHandler("tile-load-failed", (event: any) => {
-        console.error("❌ Tile load failed:", event);
+        console.error("Tile load failed:", event);
       });
 
       viewer.addHandler("tile-drawing", (event: any) => {
-        console.log("🎨 Drawing tile:", event);
+        console.log("Drawing tile:", event);
       });
 
       viewer.addHandler("tile-drawn", (event: any) => {
-        console.log("✅ Tile drawn:", event);
+        console.log("Tile drawn:", event);
       });
 
       viewer.addHandler("open", (event: any) => {
-        console.log("🚀 Viewer opened:", event);
+        console.log("Viewer opened:", event);
       });
 
       viewer.addHandler("error", (event: any) => {
-        console.error("💥 Viewer error:", event);
+        console.error("Viewer error:", event);
       });
     };
 
