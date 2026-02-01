@@ -109,8 +109,13 @@ class MLService:
         """Apply super-resolution to image"""
         try:
             if not self.models_loaded or not self.models.get('sr'):
-                # Fallback to simple upscaling
-                return image.resize((image.width * 2, image.height * 2), Image.LANCZOS)
+                # Improved fallback: High-quality Lanczos + Smart Sharpening
+                upscaled = image.resize((image.width * 2, image.height * 2), Image.LANCZOS)
+                
+                # Apply subtle sharpening to the upscaled image to avoid blur
+                from PIL import ImageFilter
+                upscaled = upscaled.filter(ImageFilter.UnsharpMask(radius=2, percent=150, threshold=3))
+                return upscaled
             
             # Convert PIL to numpy
             img_array = np.array(image)
@@ -123,24 +128,20 @@ class MLService:
             
         except Exception as e:
             logger.error(f"Error in super-resolution: {str(e)}")
-            # Return original image if enhancement fails
             return image
     
     async def denoise(self, image: Image.Image) -> Image.Image:
         """Apply denoising to image"""
         try:
-            if not self.models_loaded or not self.models.get('denoise'):
-                return image
-            
             # Convert PIL to numpy
             img_array = np.array(image)
             
-            if self.models['denoise'] == 'opencv':
-                # Use OpenCV denoising
-                denoised = cv2.fastNlMeansDenoisingColored(img_array, None, 10, 10, 7, 21)
-                return Image.fromarray(denoised)
+            # Use Bilateral Filter for better edge preservation than fastNlMeans
+            # d=9 (diameter), sigmaColor=75, sigmaSpace=75
+            denoised = cv2.bilateralFilter(img_array, 9, 75, 75)
             
-            return image
+            # Optional: Apply slight adaptive thresholding or more advanced denoising if needed
+            return Image.fromarray(denoised)
             
         except Exception as e:
             logger.error(f"Error in denoising: {str(e)}")
@@ -282,3 +283,6 @@ class MLService:
             logger.info("ML service cleaned up")
         except Exception as e:
             logger.error(f"Error cleaning up ML service: {str(e)}")
+
+# Global instance
+ml_service = MLService()

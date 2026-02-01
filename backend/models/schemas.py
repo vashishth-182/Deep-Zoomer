@@ -121,3 +121,9 @@ class ComparisonRequest(BaseModel):
     y: int
     original: bool = True
     enhanced: bool = True
+
+class PrecomputeRequest(BaseModel):
+    image_id: str
+    image_url: Optional[str] = None
+    zoom_levels: List[int]
+    operations: Optional[List[str]] = None

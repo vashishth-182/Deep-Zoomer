@@ -5,13 +5,13 @@ import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { 
-  ZoomIn, 
-  ZoomOut, 
-  Maximize2, 
-  X, 
-  RotateCcw, 
-  Settings, 
+import {
+  ZoomIn,
+  ZoomOut,
+  Maximize2,
+  X,
+  RotateCcw,
+  Settings,
   Target,
   Info,
   Download,
@@ -32,19 +32,19 @@ const PixelPerfectViewer = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const state = location.state as LocationState;
-  
+
   const viewerRef = useRef<HTMLDivElement>(null);
   const osdRef = useRef<any>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showControls, setShowControls] = useState(true);
   const [showInfo, setShowInfo] = useState(false);
-  
+
   // Pixel-perfect settings
   const [pixelRatio, setPixelRatio] = useState(2);
   const [tileSize, setTileSize] = useState(512);
   const [maxZoomLevel, setMaxZoomLevel] = useState(20);
   const [imageQuality, setImageQuality] = useState(95);
-  
+
   // Viewer state
   const [currentZoom, setCurrentZoom] = useState(1);
   const [currentCenter, setCurrentCenter] = useState({ x: 0, y: 0 });
@@ -56,106 +56,69 @@ const PixelPerfectViewer = () => {
     return null;
   }
 
+  // ✅ Initialize OpenSeadragon
   useEffect(() => {
     if (!viewerRef.current || !state.imageUrl) return;
 
     const container = viewerRef.current;
-    container.style.position = "relative";
+    if (osdRef.current) {
+      osdRef.current.destroy();
+    }
 
-    // Enhanced tile source configuration for pixel-perfect rendering
-    const tileSource = {
-      type: "dzi",
-      url: state.imageUrl,
-      tileSize: 256, // Match DZI tile size
-      overlap: 1,
-      format: "jpg"
-    };
+    const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
+
+    // We use the 'thumbnail' or 'href' as the source for the proxy if it's a DZI path that might be broken
+    // or just use the provided imageUrl. 
+    // BUT! To make it "Pixel Perfect", we want the highest resolution available.
+    let sourceUrl = state.imageUrl;
+    if (state.imageUrl.endsWith('.dzi')) {
+      sourceUrl = state.thumbnailUrl || state.imageUrl.replace('.dzi', '.jpg').replace('_tiles', '');
+    }
 
     osdRef.current = OpenSeadragon({
       element: container,
       prefixUrl: "https://cdn.jsdelivr.net/npm/openseadragon@4.1/build/openseadragon/images/",
-      tileSources: tileSource,
+      tileSources: { type: "image", url: sourceUrl }, // Start with standard view
       showNavigator: true,
-      showNavigationControl: true,
-      showSequenceControl: false,
-      showFullPageControl: true,
-      showZoomControl: true,
-      showHomeControl: true,
-      showRotationControl: true,
-      
-      // Pixel-perfect zooming configuration
-      maxZoomPixelRatio: pixelRatio, // Critical for crisp rendering
-      minZoomImageRatio: 0.01, // Allow extreme zoom out
+      visibilityRatio: 1,
+      maxZoomPixelRatio: pixelRatio,
+      defaultZoomLevel: 1,
       maxZoomLevel: maxZoomLevel,
-      minZoomLevel: 0,
-      
-      // Tile configuration for maximum quality
-      tileSize: tileSize,
-      imageLoaderLimit: 3, // Reduce concurrent loads for stability
-      timeout: 60000, // Longer timeout for high-res tiles
-      
-      // Smooth zooming and panning
-      springStiffness: 8.0, // Higher stiffness for more responsive feel
-      animationTime: 0.8, // Faster animations
-      blendTime: 0.05, // Minimal blending for crisp edges
-      constrainDuringPan: false, // Allow free panning
-      
-      // Gesture settings for precise control
-      gestureSettingsMouse: {
-        scrollToZoom: true,
-        clickToZoom: true,
-        dblClickToZoom: true,
-        flickEnabled: true,
-        pinchToZoom: true,
-        // Precise zoom control
-        zoomBy: 1.2, // Smaller zoom increments
-      },
-      gestureSettingsTouch: {
-        scrollToZoom: true,
-        clickToZoom: true,
-        dblClickToZoom: true,
-        flickEnabled: true,
-        pinchToZoom: true,
-        zoomBy: 1.2,
-      },
-      
-      // Image quality settings
-      loadTilesWithAjax: true,
-      ajaxWithCredentials: false,
-      
-      // Retry configuration for reliability
-      tileRetryMax: 5,
-      tileRetryDelay: 2000,
-      tileLoadTimeout: 60000,
-      
-      // Performance optimization
-      preserveViewport: true,
-      preserveImageSize: true,
-      
-      // High-DPI support
-      useCanvas: true, // Use Canvas for better performance
+      constrainDuringPan: true,
+      animationTime: 0.8,
+      blendTime: 0.1,
+      springStiffness: 10.0,
+      imageSmoothingEnabled: true,
     });
 
-    const viewer = osdRef.current;
+    // Fetch Deep Zoom Metadata from AI Backend
+    const encodedUrl = encodeURIComponent(window.location.origin + sourceUrl);
+    fetch(`${API_URL}/api/tiles/proxy/info.json?url=${encodedUrl}`)
+      .then(res => res.ok ? res.json() : null)
+      .then(info => {
+        if (info && info.width && osdRef.current) {
+          console.log("Pixel Perfect Metadata Ready", info);
 
-    // Enhanced event handlers for pixel-perfect experience
-    viewer.addHandler("zoom", handleZoom);
-    viewer.addHandler("pan", handlePan);
-    viewer.addHandler("tile-loaded", handleTileLoaded);
-    viewer.addHandler("tile-load-failed", handleTileLoadFailed);
-    viewer.addHandler("tile-drawing", handleTileDrawing);
-    viewer.addHandler("tile-drawn", handleTileDrawn);
+          const aiTileSource = {
+            height: info.height,
+            width: info.width,
+            tileSize: tileSize,
+            maxLevel: info.maxLevel || 14,
+            getTileUrl: (level: number, x: number, y: number) => {
+              // Ensure we use the AI backend with FULL enhancement for Pixel Perfect mode
+              return `${API_URL}/api/tiles/proxy/tile?url=${encodedUrl}&z=${level}&x=${x}&y=${y}&enhance=true&quality=${imageQuality}`;
+            }
+          };
+
+          osdRef.current.world.getItemAt(0).setSource(aiTileSource);
+        }
+      })
+      .catch(err => {
+        console.warn("AI Backend not available for Pixel Perfect mode, staying in standard view.", err);
+      });
 
     return () => {
-      viewer.removeHandler("zoom", handleZoom);
-      viewer.removeHandler("pan", handlePan);
-      viewer.removeHandler("tile-loaded", handleTileLoaded);
-      viewer.removeHandler("tile-load-failed", handleTileLoadFailed);
-      viewer.removeHandler("tile-drawing", handleTileDrawing);
-      viewer.removeHandler("tile-drawn", handleTileDrawn);
-      if (osdRef.current && osdRef.current.destroy) {
-        osdRef.current.destroy();
-      }
+      osdRef.current?.destroy();
     };
   }, [state.imageUrl, pixelRatio, tileSize, maxZoomLevel, imageQuality]);
 
@@ -163,7 +126,7 @@ const PixelPerfectViewer = () => {
     if (osdRef.current) {
       const zoom = osdRef.current.viewport.getZoom();
       setCurrentZoom(zoom);
-      
+
       // Update tile count for current zoom level
       const bounds = osdRef.current.viewport.getBounds();
       const zoomLevel = Math.ceil(Math.log2(1 / bounds.width));
@@ -372,7 +335,7 @@ const PixelPerfectViewer = () => {
                   <div>Tiles at this zoom: {tileCount}</div>
                   <div>Loading tiles: {loadingTiles}</div>
                 </div>
-                
+
                 <div className="space-y-1">
                   <label className="text-xs font-medium">Performance</label>
                   <div className="text-xs text-muted-foreground">

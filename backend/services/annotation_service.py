@@ -67,27 +67,38 @@ class AnnotationService:
     async def get_annotations(
         self, 
         image_id: str, 
+        db: Session,
         z: Optional[int] = None, 
         x: Optional[int] = None, 
-        y: Optional[int] = None,
-        db: Session
+        y: Optional[int] = None
     ) -> List[Annotation]:
         """Get annotations for an image or specific tile"""
         try:
             query = db.query(Annotation).filter(Annotation.image_id == image_id)
             
             if z is not None and x is not None and y is not None:
-                # Filter by tile coordinates
-                query = query.filter(
-                    and_(
-                        Annotation.tile_coordinates['z'].astext == str(z),
-                        Annotation.tile_coordinates['x'].astext == str(x),
-                        Annotation.tile_coordinates['y'].astext == str(y)
+                # Filter by tile coordinates - check if using SQLite or Postgres
+                from ..models.database import engine
+                if engine.url.drivername == 'sqlite':
+                    # SQLite: fetch all and filter in memory OR use json_extract (standard SQLAlchemy handles this poorly across versions)
+                    annotations = query.all()
+                    return [
+                        a for a in annotations 
+                        if str(a.tile_coordinates.get('z')) == str(z) and 
+                           str(a.tile_coordinates.get('x')) == str(x) and 
+                           str(a.tile_coordinates.get('y')) == str(y)
+                    ]
+                else:
+                    # Postgres-specific JSON filtering
+                    query = query.filter(
+                        and_(
+                            Annotation.tile_coordinates['z'].astext == str(z),
+                            Annotation.tile_coordinates['x'].astext == str(x),
+                            Annotation.tile_coordinates['y'].astext == str(y)
+                        )
                     )
-                )
             
-            annotations = query.all()
-            return annotations
+            return query.all()
             
         except Exception as e:
             logger.error(f"Error getting annotations: {str(e)}")
@@ -172,11 +183,11 @@ class AnnotationService:
     
     async def search_annotations(
         self, 
+        db: Session,
         query: str, 
         image_id: Optional[str] = None,
         annotation_type: Optional[str] = None,
-        min_confidence: Optional[float] = None,
-        db: Session
+        min_confidence: Optional[float] = None
     ) -> List[Annotation]:
         """Search annotations with filters"""
         try:
@@ -207,8 +218,8 @@ class AnnotationService:
     async def export_annotations(
         self, 
         image_id: str, 
-        format: str = "json",
-        db: Session
+        db: Session,
+        format: str = "json"
     ) -> Dict[str, Any]:
         """Export annotations in various formats"""
         try:

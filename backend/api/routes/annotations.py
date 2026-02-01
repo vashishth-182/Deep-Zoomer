@@ -123,10 +123,10 @@ async def get_image_annotations(
     try:
         annotations = await annotation_service.get_annotations(
             image_id=image_id,
+            db=db,
             z=z,
             x=x,
-            y=y,
-            db=db
+            y=y
         )
         
         # Apply additional filters
@@ -248,8 +248,8 @@ async def export_annotations(
     try:
         export_data = await annotation_service.export_annotations(
             image_id=image_id,
-            format=format,
-            db=db
+            db=db,
+            format=format
         )
         
         return export_data

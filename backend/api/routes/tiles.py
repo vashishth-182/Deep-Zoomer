@@ -12,8 +12,8 @@ from sqlalchemy.orm import Session
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-# Initialize tile service
-tile_service = TileService()
+# Use shared global instance
+from ...services.tile_service import tile_service
 
 @router.get("/{image_id}/{z}/{x}/{y}")
 async def get_tile(
@@ -67,36 +67,57 @@ async def get_tile(
         logger.error(f"Error getting tile {image_id}/{z}/{x}/{y}: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error processing tile: {str(e)}")
 
-@router.get("/{image_id}/info.json")
-async def get_image_info(image_id: str, db: Session = Depends(get_db)):
+@router.get("/proxy/info.json")
+async def get_proxy_info(url: str, db: Session = Depends(get_db)):
     """
-    Get IIIF info.json for an image
+    Get IIIF info.json for an external image URL
     """
     try:
-        # This would typically fetch from database or NASA API
-        # For now, return a basic IIIF info structure
-        info = {
-            "@context": "http://iiif.io/api/image/2/context.json",
-            "@id": f"/api/tiles/{image_id}",
-            "protocol": "http://iiif.io/api/image",
-            "width": 10000,  # This should come from actual image metadata
-            "height": 8000,
-            "tiles": [
-                {
-                    "width": 512,
-                    "scaleFactors": [1, 2, 4, 8, 16, 32]
-                }
-            ],
-            "profile": [
-                "http://iiif.io/api/image/2/level2.json"
-            ]
-        }
-        
+        info = await tile_service.get_iiif_info(url)
+        if not info:
+            raise HTTPException(status_code=400, detail="Could not retrieve image info")
         return info
-        
     except Exception as e:
-        logger.error(f"Error getting image info for {image_id}: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error getting image info: {str(e)}")
+        logger.error(f"Error proxying info: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/proxy/tile")
+async def get_proxy_tile(
+    url: str,
+    z: int = Query(...),
+    x: int = Query(...),
+    y: int = Query(...),
+    enhance: bool = Query(False),
+    labels: bool = Query(False),
+    confidence_threshold: float = Query(0.5),
+    quality: int = Query(90),
+    db: Session = Depends(get_db)
+):
+    """
+    Serve a dynamic tile for an external image URL
+    """
+    try:
+        tile_data = await tile_service.get_dynamic_tile(
+            image_url=url,
+            z=z,
+            x=x,
+            y=y,
+            enhance=enhance,
+            labels=labels,
+            confidence_threshold=confidence_threshold
+        )
+        
+        if not tile_data:
+            raise HTTPException(status_code=404, detail="Tile generation failed")
+            
+        return Response(
+            content=tile_data,
+            media_type="image/jpeg",
+            headers={"Cache-Control": "public, max-age=3600"}
+        )
+    except Exception as e:
+        logger.error(f"Error proxying tile: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/precompute")
 async def precompute_tiles(

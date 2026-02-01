@@ -5,13 +5,13 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { 
-  Search, 
-  Filter, 
-  Star, 
-  Download, 
-  Eye, 
-  Brain, 
+import {
+  Search,
+  Filter,
+  Star,
+  Download,
+  Eye,
+  Brain,
   Zap,
   AlertCircle,
   CheckCircle,
@@ -57,7 +57,7 @@ interface SearchFilters {
 const AIEnhancedNasaSearch = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
-  
+
   const [searchTerm, setSearchTerm] = useState("Earth");
   const [images, setImages] = useState<NasaItem[]>([]);
   const [loading, setLoading] = useState(false);
@@ -65,7 +65,7 @@ const AIEnhancedNasaSearch = () => {
   const [totalHits, setTotalHits] = useState(0);
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedImage, setSelectedImage] = useState<NasaItem | null>(null);
-  
+
   // AI Enhancement Features
   const [showFilters, setShowFilters] = useState(false);
   const [filters, setFilters] = useState<SearchFilters>({
@@ -75,9 +75,11 @@ const AIEnhancedNasaSearch = () => {
     hasHighRes: false,
     aiEnhanced: false
   });
-  
+
   // AI Processing Status
   const [processingStatus, setProcessingStatus] = useState<Record<string, string>>({});
+  const [processingProgress, setProcessingProgress] = useState<Record<string, number>>({});
+
   const [aiCapabilities, setAiCapabilities] = useState({
     superResolution: true,
     denoising: true,
@@ -88,25 +90,25 @@ const AIEnhancedNasaSearch = () => {
   const fetchImages = async (query: string, page: number = 1) => {
     setLoading(true);
     setError(null);
-    
+
     try {
       const response = await fetch(
         `https://images-api.nasa.gov/search?q=${query}&media_type=image&page=${page}`
       );
-      
+
       if (!response.ok) throw new Error("Failed to fetch NASA images");
-      
+
       const data: NasaApiResponse = await response.json();
-      
+
       // Filter by additional criteria
       let filteredImages = data.collection.items.filter((item) => {
         const title = item.data[0].title.toLowerCase();
         const description = item.data[0].description?.toLowerCase() || "";
         const searchQuery = query.toLowerCase();
-        
+
         return title.includes(searchQuery) || description.includes(searchQuery);
       });
-      
+
       // Apply AI enhancement filter
       if (filters.aiEnhanced) {
         filteredImages = filteredImages.filter(item => {
@@ -114,13 +116,13 @@ const AIEnhancedNasaSearch = () => {
           return checkAIEnhancementAvailable(item);
         });
       }
-      
+
       setImages(filteredImages);
       setTotalHits(data.collection.metadata.total_hits);
-      
+
       // Check AI processing status for each image
       checkAIProcessingStatus(filteredImages);
-      
+
     } catch (err: any) {
       setError(err.message);
       toast({
@@ -140,31 +142,32 @@ const AIEnhancedNasaSearch = () => {
   };
 
   const checkAIProcessingStatus = async (items: NasaItem[]) => {
-    const statusMap: Record<string, string> = {};
-    
+    const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
+
     for (const item of items) {
       const nasaId = item.data[0].nasa_id;
       try {
-        // Check if AI processing is available/complete
-        const response = await fetch(`/api/ml/status/${nasaId}`);
+        const response = await fetch(`${API_URL}/api/ml/status/${nasaId}`);
         if (response.ok) {
-          const status = await response.json();
-          statusMap[nasaId] = status.status;
-        } else {
-          statusMap[nasaId] = 'available';
+          const data = await response.json();
+          setProcessingStatus(prev => ({ ...prev, [nasaId]: data.status }));
+          setProcessingProgress(prev => ({ ...prev, [nasaId]: data.progress || 0 }));
+
+          // Continue polling if still processing
+          if (data.status === 'processing') {
+            setTimeout(() => checkAIProcessingStatus([item]), 4000);
+          }
         }
-      } catch {
-        statusMap[nasaId] = 'available';
+      } catch (err) {
+        console.error("Polling error:", err);
       }
     }
-    
-    setProcessingStatus(statusMap);
   };
 
   const handleImageClick = (item: NasaItem) => {
     const imageUrl = item.links?.[0]?.href || "";
     const nasaId = item.data[0].nasa_id;
-    
+
     if (!imageUrl) {
       toast({
         title: "No Image Available",
@@ -173,7 +176,7 @@ const AIEnhancedNasaSearch = () => {
       });
       return;
     }
-    
+
     // Navigate to AI-enhanced viewer
     navigate("/ai-viewer", {
       state: {
@@ -190,17 +193,19 @@ const AIEnhancedNasaSearch = () => {
   const requestAIEnhancement = async (nasaId: string) => {
     try {
       setProcessingStatus(prev => ({ ...prev, [nasaId]: 'processing' }));
-      
-      const response = await fetch('/api/ml/precompute', {
+      const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
+
+      const response = await fetch(`${API_URL}/api/ml/precompute`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           image_id: nasaId,
-          zoom_levels: [8, 10, 12, 14],
-          operations: ['sr', 'denoise', 'segment', 'classify']
+          image_url: images.find(img => img.data[0].nasa_id === nasaId)?.links?.[0]?.href,
+          zoom_levels: [10, 11, 12],
+          operations: ['sr', 'denoise']
         })
       });
-      
+
       if (response.ok) {
         toast({
           title: "AI Enhancement Started",
@@ -230,10 +235,10 @@ const AIEnhancedNasaSearch = () => {
     }
   };
 
-  const getStatusText = (status: string) => {
+  const getStatusText = (status: string, nasaId: string) => {
     switch (status) {
       case 'processing':
-        return 'Processing...';
+        return `Processing ${processingProgress[nasaId] || 0}%`;
       case 'completed':
         return 'AI Enhanced';
       case 'error':
@@ -320,12 +325,12 @@ const AIEnhancedNasaSearch = () => {
                   <TabsTrigger value="ai">AI Features</TabsTrigger>
                   <TabsTrigger value="advanced">Advanced</TabsTrigger>
                 </TabsList>
-                
+
                 <TabsContent value="basic" className="space-y-4">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
                       <label className="text-sm font-medium">Media Type</label>
-                      <select 
+                      <select
                         value={filters.mediaType}
                         onChange={(e) => setFilters(prev => ({ ...prev, mediaType: e.target.value }))}
                         className="w-full p-2 border rounded"
@@ -341,18 +346,18 @@ const AIEnhancedNasaSearch = () => {
                         <Input
                           type="number"
                           value={filters.yearRange[0]}
-                          onChange={(e) => setFilters(prev => ({ 
-                            ...prev, 
-                            yearRange: [parseInt(e.target.value), prev.yearRange[1]] 
+                          onChange={(e) => setFilters(prev => ({
+                            ...prev,
+                            yearRange: [parseInt(e.target.value), prev.yearRange[1]]
                           }))}
                           className="w-20"
                         />
                         <Input
                           type="number"
                           value={filters.yearRange[1]}
-                          onChange={(e) => setFilters(prev => ({ 
-                            ...prev, 
-                            yearRange: [prev.yearRange[0], parseInt(e.target.value)] 
+                          onChange={(e) => setFilters(prev => ({
+                            ...prev,
+                            yearRange: [prev.yearRange[0], parseInt(e.target.value)]
                           }))}
                           className="w-20"
                         />
@@ -360,7 +365,7 @@ const AIEnhancedNasaSearch = () => {
                     </div>
                   </div>
                 </TabsContent>
-                
+
                 <TabsContent value="ai" className="space-y-4">
                   <div className="space-y-4">
                     <div className="flex items-center justify-between">
@@ -399,16 +404,16 @@ const AIEnhancedNasaSearch = () => {
                     </div>
                   </div>
                 </TabsContent>
-                
+
                 <TabsContent value="advanced" className="space-y-4">
                   <div>
                     <label className="text-sm font-medium">Keywords</label>
                     <Input
                       placeholder="Enter keywords separated by commas"
                       value={filters.keywords.join(", ")}
-                      onChange={(e) => setFilters(prev => ({ 
-                        ...prev, 
-                        keywords: e.target.value.split(",").map(k => k.trim()).filter(k => k) 
+                      onChange={(e) => setFilters(prev => ({
+                        ...prev,
+                        keywords: e.target.value.split(",").map(k => k.trim()).filter(k => k)
                       }))}
                     />
                   </div>
@@ -425,14 +430,14 @@ const AIEnhancedNasaSearch = () => {
             <p className="text-lg text-muted-foreground">Searching NASA database...</p>
           </div>
         )}
-        
+
         {error && (
           <div className="text-center py-8">
             <AlertCircle className="w-12 h-12 text-red-500 mx-auto mb-4" />
             <p className="text-lg text-red-500">{error}</p>
           </div>
         )}
-        
+
         {!loading && images.length === 0 && !error && (
           <div className="text-center py-8">
             <ImageIcon className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
@@ -460,7 +465,7 @@ const AIEnhancedNasaSearch = () => {
                 const imageUrl = item.links?.[0]?.href || "";
                 const nasaId = item.data[0].nasa_id;
                 const status = processingStatus[nasaId] || 'available';
-                
+
                 return (
                   <Card
                     key={idx}
@@ -480,18 +485,18 @@ const AIEnhancedNasaSearch = () => {
                             <ImageIcon className="w-8 h-8" />
                           </div>
                         )}
-                        
+
                         {/* AI Status Overlay */}
                         <div className="absolute top-2 right-2">
-                          <Badge 
+                          <Badge
                             variant={status === 'completed' ? 'default' : 'secondary'}
                             className="bg-card/90 backdrop-blur"
                           >
                             {getStatusIcon(status)}
-                            <span className="ml-1">{getStatusText(status)}</span>
+                            <span className="ml-1">{getStatusText(status, nasaId)}</span>
                           </Badge>
                         </div>
-                        
+
                         {/* Hover Overlay */}
                         <div className="absolute inset-0 bg-gradient-to-t from-background via-background/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300">
                           <div className="absolute bottom-0 left-0 right-0 p-4">

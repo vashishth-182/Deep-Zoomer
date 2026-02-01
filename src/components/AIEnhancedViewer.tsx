@@ -76,100 +76,91 @@ const AIEnhancedViewer = () => {
 
   const imageUrl = state?.imageUrl || "/earth-image.jpg";
 
-  // ✅ Initialize OpenSeadragon for JPG / PNG / DZI
+  // ✅ Initialize OpenSeadragon (Once per imageUrl)
   useEffect(() => {
-    if (!viewerRef.current) return;
+    if (!viewerRef.current || !imageUrl) return;
 
     const container = viewerRef.current;
-    container.style.position = "relative";
-
     if (osdRef.current) {
       osdRef.current.destroy();
     }
 
-    const tileSource = imageUrl.endsWith(".dzi")
-      ? imageUrl
-      : { type: "image", url: imageUrl };
+    const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
     osdRef.current = OpenSeadragon({
       element: container,
-      prefixUrl:
-        "https://cdn.jsdelivr.net/npm/openseadragon@4.1/build/openseadragon/images/",
-      tileSources: tileSource,
+      prefixUrl: "https://cdn.jsdelivr.net/npm/openseadragon@4.1/build/openseadragon/images/",
+      tileSources: { type: "image", url: imageUrl }, // Start with standard view
       showNavigator: true,
       visibilityRatio: 1,
-      maxZoomPixelRatio: 2,
-      minZoomImageRatio: 0.1,
+      maxZoomPixelRatio: 1.5,
       defaultZoomLevel: 1,
-      maxZoomLevel: 20,
-      minZoomLevel: 0,
+      maxZoomLevel: 30,
       constrainDuringPan: true,
-      animationTime: 1.2,
-      blendTime: 0.2,
-      springStiffness: 5.0,
-      gestureSettingsMouse: {
-        scrollToZoom: true,
-        clickToZoom: true,
-        dblClickToZoom: true,
-        pinchToZoom: true,
-      },
-      gestureSettingsTouch: {
-        scrollToZoom: true,
-        clickToZoom: true,
-        dblClickToZoom: true,
-        pinchToZoom: true,
-      },
+      animationTime: 0.8,
+      blendTime: 0.1,
+      springStiffness: 10.0,
+      imageSmoothingEnabled: true,
     });
 
-    const viewer = osdRef.current;
-    viewer.addHandler("zoom", handleZoom);
+    // Initial Metadata Fetch
+    fetch(`${API_URL}/api/tiles/proxy/info.json?url=${encodeURIComponent(imageUrl)}`)
+      .then(res => res.ok ? res.json() : null)
+      .then(info => {
+        if (info && info.width && info.height) {
+          console.log("Deep Zoom Metadata Ready", info);
+          updateTileSource(info);
+        }
+      })
+      .catch(console.error);
 
     return () => {
-      viewer.removeHandler("zoom", handleZoom);
-      viewer.destroy();
+      osdRef.current?.destroy();
     };
   }, [imageUrl]);
 
-  // 🔄 Refresh/Enhance Effect on Zoom
-  const handleZoom = () => {
+  // ✅ Smoothly update Tiled Source when AI settings change
+  useEffect(() => {
+    if (!osdRef.current || !imageUrl) return;
+
+    const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
+
+    // Fetch info again or reuse (for now just refetch to get maxLevel)
+    fetch(`${API_URL}/api/tiles/proxy/info.json?url=${encodeURIComponent(imageUrl)}`)
+      .then(res => res.json())
+      .then(info => {
+        if (info.width) updateTileSource(info);
+      })
+      .catch(() => { });
+  }, [enhanceEnabled, labelsEnabled, confidenceThreshold]);
+
+  const updateTileSource = (info: any) => {
     if (!osdRef.current) return;
-    const viewer = osdRef.current;
-    const zoomLevel = viewer.viewport.getZoom();
+    const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
-    const overlay = document.createElement("div");
-    overlay.style.position = "absolute";
-    overlay.style.top = "0";
-    overlay.style.left = "0";
-    overlay.style.width = "100%";
-    overlay.style.height = "100%";
-    overlay.style.background = "rgba(0, 0, 0, 0.3)";
-    overlay.style.display = "flex";
-    overlay.style.alignItems = "center";
-    overlay.style.justifyContent = "center";
-    overlay.style.color = "white";
-    overlay.style.fontSize = "0.9rem";
-    overlay.style.fontWeight = "bold";
-    overlay.style.zIndex = "999";
-    overlay.innerText = "Enhancing view...";
-
-    if (viewerRef.current) viewerRef.current.appendChild(overlay);
-
-    setTimeout(() => {
-      if (viewerRef.current && viewerRef.current.contains(overlay))
-        viewerRef.current.removeChild(overlay);
-
-      const item = viewer.world.getItemAt(0);
-      if (item) {
-        const src = item.source;
-        const newUrl = src.url.includes("?")
-          ? `${src.url}&zoom=${Math.round(zoomLevel)}`
-          : `${src.url}?zoom=${Math.round(zoomLevel)}`;
-        item.setSource({
-          ...src,
-          url: newUrl,
-        });
+    const aiTileSource = {
+      height: info.height,
+      width: info.width,
+      tileSize: 256,
+      maxLevel: info.maxLevel || 14,
+      getTileUrl: (level: number, x: number, y: number) => {
+        return `${API_URL}/api/tiles/proxy/tile?url=${encodeURIComponent(imageUrl)}&z=${level}&x=${x}&y=${y}&enhance=${enhanceEnabled}&labels=${labelsEnabled}&confidence_threshold=${confidenceThreshold[0]}`;
       }
-    }, 700);
+    };
+
+    const world = osdRef.current.world;
+    if (world.getItemCount() > 0) {
+      world.getItemAt(0).setSource(aiTileSource);
+    }
+  };
+
+  // Toggling enhancement now just triggers a re-render of the tiles via useEffect dependency
+  const toggleEnhancement = () => {
+    setEnhanceEnabled(!enhanceEnabled);
+    toast({
+      title: !enhanceEnabled ? "AI Enhancement Enabled" : "AI Enhancement Disabled",
+      description: !enhanceEnabled ? "Image tiles will now be upscaled and denoised in real-time." : "Viewing original source quality.",
+    });
   };
 
   const toggleFullscreen = () => {
@@ -182,21 +173,6 @@ const AIEnhancedViewer = () => {
     }
   };
 
-  const toggleEnhancement = async () => {
-    setEnhanceEnabled(!enhanceEnabled);
-    if (osdRef.current) {
-      const item = osdRef.current.world.getItemAt(0);
-      if (!item) return;
-      const src = item.source;
-      const newUrl = enhanceEnabled
-        ? src.url.replace("?enhance=true", "")
-        : src.url + (src.url.includes("?") ? "&" : "?") + "enhance=true";
-      item.setSource({
-        ...src,
-        url: newUrl,
-      });
-    }
-  };
 
   // 🔳 Feature Overlay (for AI detection boxes)
   const renderFeatureOverlay = () => {

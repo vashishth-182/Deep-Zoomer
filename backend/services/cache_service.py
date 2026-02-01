@@ -13,6 +13,7 @@ class CacheService:
     def __init__(self):
         self.redis_client = None
         self.connected = False
+        self.memory_cache = {} # Fallback for when Redis is unavailable
         
     async def initialize(self):
         """Initialize Redis connection"""
@@ -26,28 +27,31 @@ class CacheService:
             self.connected = False
     
     async def get_tile(self, cache_key: str) -> Optional[bytes]:
-        """Get tile from cache"""
+        """Get tile from cache (Redis or Memory fallback)"""
         try:
-            if not self.connected:
-                return None
+            if self.connected:
+                cached_data = await self.redis_client.get(cache_key)
+                if cached_data:
+                    return cached_data
             
-            cached_data = await self.redis_client.get(cache_key)
-            if cached_data:
-                return cached_data
-            return None
+            # Memory fallback
+            return self.memory_cache.get(cache_key)
             
         except Exception as e:
             logger.error(f"Error getting tile from cache: {str(e)}")
-            return None
+            return self.memory_cache.get(cache_key)
     
     async def set_tile(self, cache_key: str, tile_data: bytes, ttl: int = None):
-        """Set tile in cache"""
+        """Set tile in cache (Redis and/or Memory fallback)"""
         try:
-            if not self.connected:
-                return
-            
-            ttl = ttl or settings.cache_ttl
-            await self.redis_client.setex(cache_key, ttl, tile_data)
+            # Memory fallback
+            self.memory_cache[cache_key] = tile_data
+            if len(self.memory_cache) > 200: # Simple LRU-ish cleanup
+                self.memory_cache.pop(next(iter(self.memory_cache)))
+
+            if self.connected:
+                ttl = ttl or settings.cache_ttl
+                await self.redis_client.setex(cache_key, ttl, tile_data)
             
         except Exception as e:
             logger.error(f"Error setting tile in cache: {str(e)}")
@@ -158,3 +162,6 @@ class CacheService:
                 logger.info("Cache service closed")
         except Exception as e:
             logger.error(f"Error closing cache service: {str(e)}")
+
+# Global instance
+cache_service = CacheService()

@@ -4,7 +4,7 @@ import os
 
 class Settings(BaseSettings):
     # Database
-    database_url: str = "postgresql://user:password@localhost/nasa_deep_zoom"
+    database_url: str = "sqlite:///./nasa_deep_zoom.db"
     
     # Redis Cache
     redis_url: str = "redis://localhost:6379"
@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     
     # ML Models
     models_dir: str = "models"
-    gpu_enabled: bool = True
+    gpu_enabled: bool = False
     batch_size: int = 4
     
     # Tile Configuration
@@ -35,5 +35,6 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         case_sensitive = False
+        extra = "ignore" # Don't crash on extra env vars
 
 settings = Settings()

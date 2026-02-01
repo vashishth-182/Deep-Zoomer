@@ -28,10 +28,10 @@ async def get_tile_metadata(
         # Get annotations for this tile
         annotations = await annotation_service.get_annotations(
             image_id=image_id,
+            db=db,
             z=z,
             x=x,
-            y=y,
-            db=db
+            y=y
         )
         
         # Get tile metadata from database
@@ -123,11 +123,11 @@ async def search_metadata(
     """
     try:
         annotations = await annotation_service.search_annotations(
+            db=db,
             query=query,
             image_id=image_id,
             annotation_type=annotation_type,
-            min_confidence=min_confidence,
-            db=db
+            min_confidence=min_confidence
         )
         
         return {
@@ -152,8 +152,8 @@ async def export_metadata(
     try:
         export_data = await annotation_service.export_annotations(
             image_id=image_id,
-            format=format,
-            db=db
+            db=db,
+            format=format
         )
         
         return export_data
